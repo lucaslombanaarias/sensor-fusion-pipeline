@@ -26,3 +26,6 @@ Makefile.cmake
 benchmarks/*.csv
 benchmarks/*.png
 !benchmarks/.gitkeep
+
+*.pdb
+src/vc140.pdb
