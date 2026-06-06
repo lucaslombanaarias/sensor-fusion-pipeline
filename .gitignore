@@ -1,0 +1,28 @@
+build/
+cmake-build-*/
+CMakeCache.txt
+CMakeFiles/
+CMakeScripts/
+cmake_install.cmake
+Makefile.cmake
+
+# Build artifacts
+*.o
+*.obj
+*.a
+*.so
+*.dylib
+*.dll
+*.exe
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Benchmark outputs (committed selectively)
+benchmarks/*.csv
+benchmarks/*.png
+!benchmarks/.gitkeep
