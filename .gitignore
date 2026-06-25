@@ -16,7 +16,9 @@ Makefile.cmake
 *.exe
 
 # Editors
-.vscode/
+# Ignore .vscode except the shared build/run tasks, which are tracked.
+.vscode/*
+!.vscode/tasks.json
 .idea/
 *.swp
 *.swo

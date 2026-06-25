@@ -37,6 +37,7 @@
 #pragma once
 
 #include "config.hpp"
+#include "kalman.hpp"
 #include "messages.hpp"
 #include "stats.hpp"
 
@@ -69,10 +70,22 @@ public:
         , period_(period_from_hz(cfg.loop_hz))
         , latest_per_sensor_(sensors_.size())
         , samples_consumed_per_sensor_(sensors_.size(), 0)
+        , kf_(cfg.kalman_process_noise)
     {
         last_state_.tick         = 0;
         last_state_.channel_mask = 0;
         last_state_.values.fill(0.0);
+
+        // The Kalman filter only makes sense if there is a Position or
+        // Velocity channel to estimate; otherwise leave it disengaged
+        // regardless of the config flag.
+        for (const auto& port : sensors_) {
+            if (port.config.type == SensorType::Position ||
+                port.config.type == SensorType::Velocity) {
+                has_pos_vel_ = true;
+                break;
+            }
+        }
     }
 
     Estimator(const Estimator&)            = delete;
@@ -237,12 +250,40 @@ private:
             }
         }
 
+        // Optional Kalman filter on the Position + Velocity channels.
+        // Runs a constant-velocity predict to "now", then folds in
+        // whichever position/velocity measurements arrived this tick,
+        // each weighted by its own noise variance. It always yields an
+        // estimate for both channels — coasting on the prediction when no
+        // measurement arrived — so their bits are always set. Takes
+        // precedence over the complementary filter.
+        if (cfg_.use_kalman_filter && has_pos_vel_) {
+            constexpr std::size_t kPos = static_cast<std::size_t>(SensorType::Position);
+            constexpr std::size_t kVel = static_cast<std::size_t>(SensorType::Velocity);
+
+            kf_.predict(tick_dt_seconds(now));
+            for (std::size_t i = 0; i < sensors_.size(); ++i) {
+                if (!latest_per_sensor_[i].second) continue;
+                const SensorReading& reading = latest_per_sensor_[i].first;
+                const double sigma = sensors_[i].config.noise_stddev;
+                const double R = (sigma > 0.0) ? sigma * sigma : 1e-12;
+                if (reading.type == SensorType::Position) {
+                    kf_.update_position(reading.value, R);
+                } else if (reading.type == SensorType::Velocity) {
+                    kf_.update_velocity(reading.value, R);
+                }
+            }
+            last_state_.values[kPos] = kf_.position();
+            last_state_.values[kVel] = kf_.velocity();
+            mask |= (1u << kPos) | (1u << kVel);
+        }
+
         // Optional complementary filter on the Position channel. Blends
         // the encoder-measured position with the velocity integral so we
         // get encoder accuracy at low frequency, velocity smoothness at
         // high frequency, and — importantly — a usable position estimate
         // even on ticks where no fresh encoder sample arrived.
-        if (cfg_.use_complementary_filter) {
+        else if (cfg_.use_complementary_filter) {
             constexpr std::size_t kPos = static_cast<std::size_t>(SensorType::Position);
             constexpr std::size_t kVel = static_cast<std::size_t>(SensorType::Velocity);
             const std::uint32_t pos_bit = (1u << kPos);
@@ -253,7 +294,7 @@ private:
                 (mask & vel_bit) || (last_state_.channel_mask & vel_bit);
 
             if (have_velocity) {
-                const double dt = comp_dt_seconds(now);
+                const double dt = tick_dt_seconds(now);
                 const double velocity = last_state_.values[kVel];
                 // Predict from the *previous* fused position plus the
                 // velocity integral over this interval.
@@ -281,18 +322,19 @@ private:
         last_state_.tick         = tick_count_.load(std::memory_order_relaxed);
     }
 
-    // Seconds since the previous fuse_tick, for the complementary
-    // filter's velocity integration. First call returns the nominal
-    // loop period so the very first prediction isn't a huge dt.
-    double comp_dt_seconds(const Timestamp& now) noexcept {
+    // Seconds since the previous fuse_tick, used by the complementary
+    // filter's velocity integration and the Kalman filter's predict step.
+    // First call returns the nominal loop period so the very first
+    // prediction isn't a huge dt.
+    double tick_dt_seconds(const Timestamp& now) noexcept {
         double dt;
-        if (comp_have_last_time_) {
-            dt = std::chrono::duration<double>(now - comp_last_time_).count();
+        if (have_last_tick_time_) {
+            dt = std::chrono::duration<double>(now - last_tick_time_).count();
         } else {
             dt = std::chrono::duration<double>(period_).count();
-            comp_have_last_time_ = true;
+            have_last_tick_time_ = true;
         }
-        comp_last_time_ = now;
+        last_tick_time_ = now;
         return dt;
     }
 
@@ -317,8 +359,14 @@ private:
 
     // Complementary filter state (used only when enabled in config).
     double    comp_prev_position_  = 0.0;
-    Timestamp comp_last_time_{};
-    bool      comp_have_last_time_ = false;
+
+    // Per-tick dt tracking, shared by the complementary and Kalman filters.
+    Timestamp last_tick_time_{};
+    bool      have_last_tick_time_ = false;
+
+    // Kalman filter state (used only when enabled in config).
+    KalmanFilter2 kf_;
+    bool          has_pos_vel_ = false;
 };
 
 } // namespace sfp

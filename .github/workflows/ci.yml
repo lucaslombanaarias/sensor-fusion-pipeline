@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  linux:
+    name: Linux (g++)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compiler version
+        run: g++ --version
+
+      # The bundled Makefile is the documented quick-start path.
+      - name: Build and test (Makefile)
+        run: |
+          make
+          make test
+
+      # The CMake path also drives the test suite via ctest.
+      - name: Build and test (CMake + ctest)
+        run: |
+          cmake -B build-cmake -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-cmake -j
+          ctest --test-dir build-cmake --output-on-failure
+
+  windows:
+    name: Windows (MSVC)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -B build-cmake
+
+      - name: Build
+        run: cmake --build build-cmake --config Release
+
+      - name: Test
+        run: ctest --test-dir build-cmake -C Release --output-on-failure

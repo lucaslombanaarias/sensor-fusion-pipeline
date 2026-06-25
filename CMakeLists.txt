@@ -9,12 +9,21 @@ if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release)
 endif()
 
-# Strict warnings — same set the Makefile uses.
-add_compile_options(
-    -Wall -Wextra -Wpedantic -Wshadow
-    -Wnon-virtual-dtor -Wold-style-cast -Wcast-align
-    -Wconversion -Wsign-conversion
-)
+# Strict warnings. The GCC/Clang set matches the Makefile; MSVC gets its
+# closest equivalent (plus _CRT_SECURE_NO_WARNINGS to silence the C4996
+# nag about standard fopen) so the Windows CI build is clean too.
+if(MSVC)
+    # /wd4324: the SPSC ring buffer is deliberately padded with alignas to
+    # avoid false sharing — that "structure was padded" warning is the
+    # design working as intended, not a problem.
+    add_compile_options(/W4 /permissive- /wd4324 /D_CRT_SECURE_NO_WARNINGS)
+else()
+    add_compile_options(
+        -Wall -Wextra -Wpedantic -Wshadow
+        -Wnon-virtual-dtor -Wold-style-cast -Wcast-align
+        -Wconversion -Wsign-conversion
+    )
+endif()
 
 find_package(Threads REQUIRED)
 
@@ -49,10 +58,14 @@ add_executable(test_logger tests/test_logger.cpp)
 target_link_libraries(test_logger PRIVATE sfp_core)
 add_test(NAME logger COMMAND test_logger)
 
+add_executable(test_kalman tests/test_kalman.cpp)
+target_link_libraries(test_kalman PRIVATE sfp_core)
+add_test(NAME kalman COMMAND test_kalman)
+
 # Optional TSAN build: `cmake -DSFP_TSAN=ON ..`
 option(SFP_TSAN "Build tests with ThreadSanitizer" OFF)
 if(SFP_TSAN)
-    foreach(tgt test_ring_buffer test_sensor test_estimator test_logger)
+    foreach(tgt test_ring_buffer test_sensor test_estimator test_logger test_kalman)
         target_compile_options(${tgt} PRIVATE -fsanitize=thread -g -O1)
         target_link_options(${tgt} PRIVATE -fsanitize=thread)
     endforeach()

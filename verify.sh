@@ -24,6 +24,10 @@ echo "=== Demo: robotics config, 5 s (complementary filter on) ==="
 ./build/sfp --config robotics --duration 5 --csv robotics_demo.csv
 
 echo
+echo "=== Demo: robotics config, 5 s (Kalman filter on) ==="
+./build/sfp --config robotics --duration 5 --kalman --csv robotics_kalman_demo.csv
+
+echo
 echo "=== Demo: lock-free vs locked comparison, battery, 5 s ==="
 ./build/sfp --config battery --duration 5 --compare --csv battery_compare.csv
 

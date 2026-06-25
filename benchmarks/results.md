@@ -47,12 +47,12 @@ with the mutex-backed buffers. Three representative runs:
 | 3   | 0.44 µs                | 0.84 µs             | 1.91x               |
 
 The lock-free buffer consistently delivers ~1.85–1.92x lower mean fusion
-latency. The win comes from the drain path: at each tick the estimator
-pops from four sensor buffers and pushes one log record. The locked
-variant takes and releases a mutex on every one of those operations; the
-lock-free variant does a pair of atomic loads/stores with no kernel
-involvement and no contention (single producer, single consumer per
-buffer).
+latency. The win comes from the drain path: at each tick the timed region
+pops from four sensor buffers (the single log-record push happens just
+after, outside the measured window). The locked variant takes and
+releases a mutex on every one of those pops; the lock-free variant does a
+pair of atomic loads/stores with no kernel involvement and no contention
+(single producer, single consumer per buffer).
 
 **On jitter, the two are statistically indistinguishable.** Jitter is
 governed by when the OS wakes the estimator thread, which the buffer
@@ -107,6 +107,36 @@ The filter's effect is quantified directly in `test_estimator`:
 
 The blend is `pos = α·measured + (1−α)·(prev + v·dt)` with α = 0.05,
 giving a time constant of about 95 ms at the 5 ms loop period.
+
+## Kalman filter (`--kalman`)
+
+`--kalman` swaps a 2-state constant-velocity Kalman filter in for the
+complementary filter on the Position/Velocity channels:
+
+```bash
+./build/sfp --config robotics --duration 30 --kalman --csv robot_kf.csv
+```
+
+On the same noisy-encoder / clean-velocity setup as the complementary
+filter, `test_estimator` measures:
+
+- **Position RMS error: ~0.048 → ~0.008 with the filter on (~83%
+  reduction).** Comparable headline accuracy to the complementary
+  filter, but the Kalman filter weights each measurement by its own
+  noise variance instead of using a fixed blend constant, and carries a
+  full covariance so the Position and Velocity estimates are coupled.
+
+The coupling is the qualitative difference, shown directly in
+`test_kalman`: fed a **position-only** ramp `p = v·t` with *no* velocity
+measurements at all, the filter recovers the velocity exactly (2.0 in
+the test) through the off-diagonal covariance term — something neither
+the per-channel average nor the complementary filter can do. The unit
+tests also confirm the covariance shrinks as measurements accumulate and
+stays symmetric and positive-semidefinite over thousands of steps.
+
+Timing is unchanged from the other configs (the update is a handful of
+scalar operations, no matrix inversion): mean fusion latency stays
+around 1 µs at 199–200 Hz with zero drops.
 
 ## Environment
 

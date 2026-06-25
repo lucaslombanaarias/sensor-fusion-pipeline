@@ -68,6 +68,19 @@ struct EstimatorConfig {
     // unaffected.
     bool   use_complementary_filter = false;
     double complementary_alpha      = 0.02;
+
+    // --- Kalman filter (robotics context) -------------------------------
+    // When enabled, the Position and Velocity channels are estimated
+    // jointly by a 2-state constant-velocity Kalman filter (see
+    // kalman.hpp) instead of the per-channel average / complementary
+    // filter. The filter carries a full covariance, so the two channels
+    // are statistically coupled and each measurement is weighted by its
+    // own noise. kalman_process_noise is the acceleration spectral
+    // density q: larger tracks faster, smaller smooths more. Takes
+    // precedence over the complementary filter when both are set.
+    // Ignored unless a Position or Velocity channel exists.
+    bool   use_kalman_filter   = false;
+    double kalman_process_noise = 1.0;
 };
 
 } // namespace sfp

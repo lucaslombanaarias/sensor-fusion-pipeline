@@ -1,0 +1,26 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "build",
+      "type": "shell",
+      "command": "make",
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      }
+    },
+    {
+      "label": "run battery",
+      "type": "shell",
+      "command": "./build/sfp --config battery --duration 5",
+      "dependsOn": "build"
+    },
+    {
+      "label": "run robotics",
+      "type": "shell",
+      "command": "./build/sfp --config robotics --duration 5",
+      "dependsOn": "build"
+    }
+  ]
+}

@@ -486,6 +486,79 @@ bool test_complementary_coasts() {
     return true;
 }
 
+// Kalman filter: the same noisy-encoder + clean-velocity setup as the
+// complementary-filter test, but routed through the coupled 2-state
+// Kalman filter. It should track the true trajectory with substantially
+// lower RMS error than the raw encoder.
+bool test_kalman_reduces_error() {
+    const double pos_sigma = 0.05;   // noisy encoder
+    const double velocity  = 0.5;    // rad/s, also the position drift
+    const sfp::SensorConfig pos_cfg = sfp::make_sensor(
+        /*id=*/0, sfp::SensorType::Position, /*hz=*/1000.0,
+        /*truth=*/0.0, /*drift=*/velocity, /*sigma=*/pos_sigma);
+    const sfp::SensorConfig vel_cfg = sfp::make_sensor(
+        /*id=*/1, sfp::SensorType::Velocity, /*hz=*/1000.0,
+        /*truth=*/velocity, /*drift=*/0.0, /*sigma=*/0.005);
+
+    auto run = [&](bool use_kalman) -> double {
+        sfp::EstimatorConfig est_cfg{/*hz=*/200.0, /*spin_us=*/50};
+        est_cfg.use_kalman_filter    = use_kalman;
+        est_cfg.kalman_process_noise = 1.0;
+
+        SensorBuf pbuf, vbuf;
+        LogBuf    lbuf;
+        std::atomic<bool> running{true};
+        Sensor ps(pos_cfg, &pbuf, &running);
+        Sensor vs(vel_cfg, &vbuf, &running);
+        EstimatorT est(est_cfg,
+                       {EstimatorT::SensorPort{&pbuf, pos_cfg},
+                        EstimatorT::SensorPort{&vbuf, vel_cfg}},
+                       &lbuf, &running);
+        ps.start();
+        vs.start();
+        est.start();
+        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+        running.store(false, std::memory_order_release);
+        ps.join();
+        vs.join();
+        est.join();
+
+        const std::size_t kPos =
+            static_cast<std::size_t>(sfp::SensorType::Position);
+        sfp::LogRecord rec;
+        bool have_t0 = false;
+        sfp::Timestamp t0{};
+        double sum_sq = 0.0;
+        std::size_t n = 0;
+        while (lbuf.pop(rec)) {
+            if (!(rec.state.channel_mask & (1u << kPos))) continue;
+            if (!have_t0) { t0 = rec.state.timestamp; have_t0 = true; }
+            const double t =
+                std::chrono::duration<double>(rec.state.timestamp - t0).count();
+            const double err = rec.state.values[kPos] - velocity * t;
+            sum_sq += err * err;
+            ++n;
+        }
+        return (n > 0) ? std::sqrt(sum_sq / static_cast<double>(n)) : 1e9;
+    };
+
+    const double rms_off = run(false);
+    const double rms_on  = run(true);
+
+    // Same conservative bar as the complementary-filter test: at least a
+    // 25% reduction. In practice the Kalman filter does much better.
+    if (rms_on >= rms_off * 0.75) {
+        std::cerr << "  FAIL: Kalman did not reduce error enough — off="
+                  << rms_off << " on=" << rms_on << '\n';
+        return false;
+    }
+    std::cout << "  PASS: position RMS error off=" << rms_off
+              << " on=" << rms_on << " ("
+              << (100.0 * (1.0 - rms_on / rms_off)) << "% reduction, "
+              << "Kalman)\n";
+    return true;
+}
+
 } // namespace
 
 int main() {
@@ -511,6 +584,9 @@ int main() {
 
     std::cout << "Test 7: complementary filter coasts through sparse encoder\n";
     if (!test_complementary_coasts()) return 1;
+
+    std::cout << "Test 8: Kalman filter reduces position error\n";
+    if (!test_kalman_reduces_error()) return 1;
 
     std::cout << "\nAll estimator tests passed.\n";
     return 0;

@@ -1,5 +1,7 @@
 # Real-time multi-sensor fusion pipeline
 
+[![CI](https://github.com/lucaslombanaarias/sensor-fusion-pipeline/actions/workflows/ci.yml/badge.svg)](https://github.com/lucaslombanaarias/sensor-fusion-pipeline/actions/workflows/ci.yml)
+
 A modular C++17 pipeline that fuses several concurrent, noisy sensor
 streams into a single real-time state estimate at a fixed loop rate,
 with measured latency and jitter. One config struct swaps the whole
@@ -99,7 +101,7 @@ the 1 ms Windows timer floor rather than by the pipeline.
 
 ```
 sfp [--config battery|robotics] [--duration SECONDS]
-    [--spin-us N] [--csv PATH] [--compare]
+    [--spin-us N] [--csv PATH] [--compare] [--kalman]
 ```
 
 - `--config`   which sensor set to simulate (default battery)
@@ -107,6 +109,8 @@ sfp [--config battery|robotics] [--duration SECONDS]
 - `--spin-us`  busy-wait window before each deadline (default 50)
 - `--csv`      output path (default fusion_log.csv)
 - `--compare`  run lock-free and locked back to back, print a table
+- `--kalman`   use the Kalman filter for Position/Velocity instead of the
+               complementary filter (meaningful for the robotics config)
 
 ## Design notes
 
@@ -159,6 +163,16 @@ The timing-critical thread.
   coasts on integration). In testing this cuts position RMS error
   ~85% versus the raw encoder, and keeps the position present on 100%
   of ticks when the encoder runs at 5 Hz under a 200 Hz loop.
+- **Kalman filter (`include/kalman.hpp`, opt-in via `--kalman`):** a
+  2-state constant-velocity filter that estimates Position and Velocity
+  *jointly*, carrying a full 2×2 covariance. Unlike the per-channel
+  average and the fixed-gain complementary filter, the off-diagonal
+  covariance term couples the two channels — so a velocity measurement
+  sharpens the position estimate and the filter even **infers velocity
+  from a position-only ramp**. Each measurement is weighted by its own
+  noise; no fixed blend constant. Because every measurement is scalar,
+  the gain is one division — no matrix inversion, no allocation.
+  Reduces position RMS error ~83% versus the raw encoder in testing.
 - **No hot-path allocation:** all per-tick scratch is pre-sized in the
   constructor, so latency variance stays low.
 - **Welford stats** (`include/stats.hpp`) accumulate latency and jitter
@@ -182,12 +196,16 @@ found no data races.
   RNG streams.
 - `test_estimator` — convergence to truth; the 1/√2 variance-reduction
   check; multi-channel independence; 200 Hz timing and jitter bounds;
-  complementary-filter error reduction and velocity coasting.
+  complementary-filter and Kalman-filter error reduction; velocity coasting.
 - `test_logger` — CSV header/columns, value round-trip, zero loss under
   50k records.
+- `test_kalman` — filter math in isolation: predict-only coasting,
+  covariance shrinkage, velocity inferred from a position-only ramp, and
+  a covariance that stays symmetric and positive-semidefinite.
 
 Compiled with `-Wall -Wextra -Wpedantic -Wshadow -Wconversion
--Wsign-conversion` and clean.
+-Wsign-conversion` (g++/clang) or `/W4 /permissive-` (MSVC) and clean.
+CI builds and runs the suite on Linux (g++) and Windows (MSVC).
 
 ## Layout
 
@@ -204,7 +222,9 @@ sensor-fusion-pipeline/
 │   ├── stats.hpp            Welford RunningStats
 │   ├── sensor.hpp           SensorProducer<Buffer>
 │   ├── estimator.hpp        Estimator<SensorBuffer, LogBuffer>
+│   ├── kalman.hpp           KalmanFilter2 (constant-velocity)
 │   ├── logger.hpp           Logger<LogBuffer>
+│   ├── platform.hpp         ScopedHighResTimer (Windows timer shim)
 │   └── benchmark.hpp        run_pipeline<...>()
 ├── src/
 │   └── main.cpp             CLI + orchestration
@@ -212,7 +232,9 @@ sensor-fusion-pipeline/
 │   ├── test_ring_buffer.cpp
 │   ├── test_sensor.cpp
 │   ├── test_estimator.cpp
-│   └── test_logger.cpp
+│   ├── test_logger.cpp
+│   ├── test_kalman.cpp
+│   └── test_util.hpp
 ├── scripts/
 │   └── plot_latency.py
 └── benchmarks/
@@ -225,9 +247,10 @@ sensor-fusion-pipeline/
 
 ## Possible extensions
 
-- A full Kalman / EKF estimator in place of the per-channel weighted
-  average, for genuinely coupled state (e.g. estimating position,
-  velocity, and acceleration jointly with a motion model).
+- Extend the Kalman filter to a 3-state (position, velocity,
+  acceleration) model, or a full multi-dimensional EKF for nonlinear
+  motion — the current `kalman.hpp` is a 2-state constant-velocity
+  starting point.
 - CPU pinning + `SCHED_FIFO` to push jitter down another order of
   magnitude and remove the millisecond-scale scheduler spikes.
 - A multi-producer buffer variant if a single channel ever needs more

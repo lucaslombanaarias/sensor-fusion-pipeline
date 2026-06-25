@@ -97,6 +97,7 @@ int main(int argc, char** argv) {
     int         spin_us     = 50;
     std::string csv_path    = "fusion_log.csv";
     bool        compare     = false;
+    bool        kalman      = false;
 
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
@@ -112,10 +113,12 @@ int main(int argc, char** argv) {
         else if (arg == "--spin-us")  spin_us = std::atoi(next("--spin-us"));
         else if (arg == "--csv")      csv_path = next("--csv");
         else if (arg == "--compare")  compare = true;
+        else if (arg == "--kalman")   kalman = true;
         else if (arg == "--help" || arg == "-h") {
             std::printf(
                 "usage: %s [--config battery|robotics] "
-                "[--duration S] [--spin-us N] [--csv PATH] [--compare]\n",
+                "[--duration S] [--spin-us N] [--csv PATH] [--compare] "
+                "[--kalman]\n",
                 argv[0]);
             return 0;
         } else {
@@ -129,12 +132,22 @@ int main(int argc, char** argv) {
             ? sfp::robotics_config(duration_s, spin_us)
             : sfp::battery_config(duration_s, spin_us);
 
+    // --kalman swaps the Kalman filter in for the complementary filter on
+    // the Position/Velocity channels (meaningful for the robotics config).
+    if (kalman) {
+        cfg.estimator.use_kalman_filter        = true;
+        cfg.estimator.use_complementary_filter = false;
+    }
+
     std::printf("=== Sensor fusion pipeline: %s config ===\n",
                 cfg.name.c_str());
     std::printf("  %zu sensors, %.0f Hz estimator, %.0f s run, "
-                "%d us spin window\n\n",
+                "%d us spin window%s\n\n",
                 cfg.sensors.size(), cfg.estimator.loop_hz,
-                cfg.duration_s, spin_us);
+                cfg.duration_s, spin_us,
+                cfg.estimator.use_kalman_filter   ? ", Kalman filter"
+                : cfg.estimator.use_complementary_filter ? ", complementary filter"
+                : "");
 
     if (compare) {
         std::printf("Running lock-free pipeline (with CSV)...\n");

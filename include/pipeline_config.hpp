@@ -68,6 +68,10 @@ inline PipelineConfig robotics_config(double duration_s = 30.0,
     // velocity integral. alpha = 0.05 → time constant ~95 ms at 5 ms dt.
     cfg.estimator.use_complementary_filter = true;
     cfg.estimator.complementary_alpha      = 0.05;
+    // Process noise for the optional Kalman filter (--kalman swaps it in
+    // for the complementary filter). Low q: the joint is near
+    // constant-velocity, so trust the model and smooth hard.
+    cfg.estimator.kalman_process_noise     = 1.0;
     cfg.sensors = {
         // Joint encoder: position in radians, sweeping, low noise.
         make_sensor(0, SensorType::Position, /*hz=*/1000.0,
