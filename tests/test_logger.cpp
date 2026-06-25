@@ -11,6 +11,7 @@
 #include "logger.hpp"
 #include "messages.hpp"
 #include "ring_buffer.hpp"
+#include "test_util.hpp"
 
 #include <atomic>
 #include <chrono>
@@ -61,7 +62,7 @@ sfp::LogRecord make_record(std::uint64_t tick, double temp, double volt,
 }
 
 bool test_csv_header_and_columns() {
-    const std::string path = "/tmp/sfp_test_logger_1.csv";
+    const std::string path = sfp::test::temp_path("sfp_test_logger_1.csv");
     std::remove(path.c_str());
 
     LogBuf buf;
@@ -121,7 +122,7 @@ bool test_csv_header_and_columns() {
 }
 
 bool test_values_round_trip() {
-    const std::string path = "/tmp/sfp_test_logger_2.csv";
+    const std::string path = sfp::test::temp_path("sfp_test_logger_2.csv");
     std::remove(path.c_str());
 
     LogBuf buf;
@@ -173,7 +174,7 @@ bool test_values_round_trip() {
 }
 
 bool test_no_loss_under_load() {
-    const std::string path = "/tmp/sfp_test_logger_3.csv";
+    const std::string path = sfp::test::temp_path("sfp_test_logger_3.csv");
     std::remove(path.c_str());
 
     LogBuf buf;
@@ -223,7 +224,7 @@ bool test_no_loss_under_load() {
 }
 
 bool test_locked_logger() {
-    const std::string path = "/tmp/sfp_test_logger_4.csv";
+    const std::string path = sfp::test::temp_path("sfp_test_logger_4.csv");
     std::remove(path.c_str());
 
     LogBufL buf;

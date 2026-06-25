@@ -74,6 +74,27 @@ Plot the CSV (needs `pip install matplotlib`):
 python3 scripts/plot_latency.py out.csv latency.png
 ```
 
+### Windows (MSVC)
+
+The pipeline is standard C++17 and also builds and passes its full test
+suite under MSVC. From a *x64 Native Tools* prompt:
+
+```bat
+cl /std:c++17 /O2 /EHsc /D_CRT_SECURE_NO_WARNINGS /Iinclude src\main.cpp /Fe:sfp.exe
+```
+
+(`_CRT_SECURE_NO_WARNINGS` silences MSVC's nag about standard `fopen`,
+which is the warning-free default under g++/clang.)
+
+`include/platform.hpp` requests 1 ms timer resolution on Windows
+(`timeBeginPeriod`) for the duration of the process — without it the
+default ~15.6 ms scheduler tick prevents the fixed-rate loops from
+hitting their deadlines. It is a compiled-out no-op on POSIX. Note that
+the **headline latency/jitter figures above are Linux numbers**;
+Windows reproduces the lock-free-vs-locked *advantage* but with much
+larger scheduler jitter, and sensor rates at/above ~1 kHz are bounded by
+the 1 ms Windows timer floor rather than by the pipeline.
+
 ### CLI
 
 ```

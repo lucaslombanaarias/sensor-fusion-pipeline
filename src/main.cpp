@@ -14,6 +14,7 @@
 
 #include "benchmark.hpp"
 #include "pipeline_config.hpp"
+#include "platform.hpp"
 #include "ring_buffer.hpp"
 
 #include <cstdio>
@@ -86,6 +87,11 @@ void print_comparison(const sfp::BenchmarkResult& lf,
 } // namespace
 
 int main(int argc, char** argv) {
+    // On Windows, pull the system timer down to 1 ms for the process
+    // lifetime so the fixed-rate loops can hit their deadlines. No-op
+    // on POSIX.
+    sfp::ScopedHighResTimer hires_timer;
+
     std::string config_name = "battery";
     double      duration_s  = 30.0;
     int         spin_us     = 50;

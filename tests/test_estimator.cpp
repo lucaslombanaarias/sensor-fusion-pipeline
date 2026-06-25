@@ -15,6 +15,7 @@
 #include "config.hpp"
 #include "estimator.hpp"
 #include "messages.hpp"
+#include "platform.hpp"
 #include "ring_buffer.hpp"
 #include "sensor.hpp"
 #include "stats.hpp"
@@ -488,6 +489,8 @@ bool test_complementary_coasts() {
 } // namespace
 
 int main() {
+    sfp::ScopedHighResTimer hires_timer;  // 1 ms timer on Windows; no-op on POSIX
+
     std::cout << "Test 1: single sensor converges to truth\n";
     if (!test_single_sensor_converges()) return 1;
 
