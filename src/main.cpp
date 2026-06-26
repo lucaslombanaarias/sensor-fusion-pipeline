@@ -42,6 +42,9 @@ void print_result(const sfp::BenchmarkResult& r) {
     std::printf("  %-16s : %.3f s\n", "duration", r.duration_s);
     std::printf("  %-16s : %.1f Hz\n", "throughput", r.throughput_hz);
     std::printf("  %-16s : %.2f us\n", "latency mean", r.latency_mean_us);
+    std::printf("  %-16s : %.2f us\n", "latency p50", r.latency_p50_us);
+    std::printf("  %-16s : %.2f us\n", "latency p99", r.latency_p99_us);
+    std::printf("  %-16s : %.2f us\n", "latency p99.9", r.latency_p999_us);
     std::printf("  %-16s : %.2f us\n", "latency max", r.latency_max_us);
     std::printf("  %-16s : %.2f us\n", "jitter mean", r.jitter_mean_us);
     std::printf("  %-16s : %.2f us\n", "jitter stddev", r.jitter_stddev_us);
@@ -65,6 +68,12 @@ void print_comparison(const sfp::BenchmarkResult& lf,
                 lf.throughput_hz, lk.throughput_hz);
     std::printf("%-20s %15.2f %15.2f\n", "latency mean (us)",
                 lf.latency_mean_us, lk.latency_mean_us);
+    std::printf("%-20s %15.2f %15.2f\n", "latency p50 (us)",
+                lf.latency_p50_us, lk.latency_p50_us);
+    std::printf("%-20s %15.2f %15.2f\n", "latency p99 (us)",
+                lf.latency_p99_us, lk.latency_p99_us);
+    std::printf("%-20s %15.2f %15.2f\n", "latency p99.9 (us)",
+                lf.latency_p999_us, lk.latency_p999_us);
     std::printf("%-20s %15.2f %15.2f\n", "latency max (us)",
                 lf.latency_max_us, lk.latency_max_us);
     std::printf("%-20s %15.2f %15.2f\n", "jitter mean (us)",
@@ -98,6 +107,7 @@ int main(int argc, char** argv) {
     std::string csv_path    = "fusion_log.csv";
     bool        compare     = false;
     bool        kalman      = false;
+    bool        no_filter   = false;
 
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
@@ -112,13 +122,14 @@ int main(int argc, char** argv) {
         else if (arg == "--duration") duration_s = std::atof(next("--duration"));
         else if (arg == "--spin-us")  spin_us = std::atoi(next("--spin-us"));
         else if (arg == "--csv")      csv_path = next("--csv");
-        else if (arg == "--compare")  compare = true;
-        else if (arg == "--kalman")   kalman = true;
+        else if (arg == "--compare")   compare = true;
+        else if (arg == "--kalman")    kalman = true;
+        else if (arg == "--no-filter") no_filter = true;
         else if (arg == "--help" || arg == "-h") {
             std::printf(
                 "usage: %s [--config battery|robotics] "
                 "[--duration S] [--spin-us N] [--csv PATH] [--compare] "
-                "[--kalman]\n",
+                "[--kalman] [--no-filter]\n",
                 argv[0]);
             return 0;
         } else {
@@ -136,6 +147,12 @@ int main(int argc, char** argv) {
     // the Position/Velocity channels (meaningful for the robotics config).
     if (kalman) {
         cfg.estimator.use_kalman_filter        = true;
+        cfg.estimator.use_complementary_filter = false;
+    }
+    // --no-filter drops to raw per-channel fusion (no smoothing) — handy
+    // as the baseline the Kalman/complementary filters are compared to.
+    if (no_filter) {
+        cfg.estimator.use_kalman_filter        = false;
         cfg.estimator.use_complementary_filter = false;
     }
 

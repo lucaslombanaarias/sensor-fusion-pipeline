@@ -62,11 +62,29 @@ add_executable(test_kalman tests/test_kalman.cpp)
 target_link_libraries(test_kalman PRIVATE sfp_core)
 add_test(NAME kalman COMMAND test_kalman)
 
+add_executable(test_histogram tests/test_histogram.cpp)
+target_link_libraries(test_histogram PRIVATE sfp_core)
+add_test(NAME histogram COMMAND test_histogram)
+
+set(SFP_TEST_TARGETS
+    test_ring_buffer test_sensor test_estimator test_logger
+    test_kalman test_histogram)
+
 # Optional TSAN build: `cmake -DSFP_TSAN=ON ..`
 option(SFP_TSAN "Build tests with ThreadSanitizer" OFF)
 if(SFP_TSAN)
-    foreach(tgt test_ring_buffer test_sensor test_estimator test_logger test_kalman)
+    foreach(tgt ${SFP_TEST_TARGETS})
         target_compile_options(${tgt} PRIVATE -fsanitize=thread -g -O1)
         target_link_options(${tgt} PRIVATE -fsanitize=thread)
+    endforeach()
+endif()
+
+# Optional ASan + UBSan build: `cmake -DSFP_ASAN=ON ..`
+option(SFP_ASAN "Build tests with Address + UndefinedBehavior sanitizers" OFF)
+if(SFP_ASAN)
+    foreach(tgt ${SFP_TEST_TARGETS})
+        target_compile_options(${tgt} PRIVATE
+            -fsanitize=address,undefined -fno-omit-frame-pointer -g -O1)
+        target_link_options(${tgt} PRIVATE -fsanitize=address,undefined)
     endforeach()
 endif()

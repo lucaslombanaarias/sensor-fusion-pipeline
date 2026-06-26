@@ -39,6 +39,9 @@ struct BenchmarkResult {
     double        duration_s       = 0.0;
     double        throughput_hz    = 0.0;   // fused estimates per second
     double        latency_mean_us  = 0.0;
+    double        latency_p50_us   = 0.0;
+    double        latency_p99_us   = 0.0;
+    double        latency_p999_us  = 0.0;
     double        latency_max_us   = 0.0;
     double        jitter_mean_us   = 0.0;
     double        jitter_stddev_us = 0.0;
@@ -109,6 +112,9 @@ BenchmarkResult run_pipeline(const PipelineConfig& cfg,
     r.duration_s       = elapsed;
     r.throughput_hz    = static_cast<double>(r.ticks) / elapsed;
     r.latency_mean_us  = estimator.latency_ns().mean() / 1000.0;
+    r.latency_p50_us   = estimator.latency_hist().percentile(50.0)  / 1000.0;
+    r.latency_p99_us   = estimator.latency_hist().percentile(99.0)  / 1000.0;
+    r.latency_p999_us  = estimator.latency_hist().percentile(99.9)  / 1000.0;
     r.latency_max_us   = estimator.latency_ns().max() / 1000.0;
     r.jitter_mean_us   = estimator.jitter_us().mean();
     r.jitter_stddev_us = estimator.jitter_us().stddev();

@@ -17,7 +17,8 @@ dependencies.
 
 Battery config, 200 Hz estimator, 4 sensors, 30 s run, stock Linux:
 
-- **Fusion latency: 0.38 µs mean** (376 ns), 7.6 µs max
+- **Fusion latency: 0.38 µs mean** (376 ns), p50 / p99 / p99.9 and max
+  all reported per run from a fixed-memory histogram
 - **Loop rate: 199.4 Hz** against a 200 Hz target
 - **Jitter: 35 µs mean, 102 µs stddev** (OS-scheduler bound)
 - **~50,800 sensor samples fused, 0 dropped**
@@ -25,7 +26,14 @@ Battery config, 200 Hz estimator, 4 sensors, 30 s run, stock Linux:
 
 ![latency](benchmarks/battery_latency.png)
 
-Full methodology and the lock-free-vs-locked comparison are in
+The Kalman filter tracking the robot-arm joint, plotted as error vs the
+true trajectory — the raw encoder (red) against the filtered estimate
+(blue):
+
+![fusion](benchmarks/fusion_kalman.png)
+
+Full methodology, the lock-free-vs-locked comparison, and the
+tail-latency percentiles are in
 [benchmarks/results.md](benchmarks/results.md).
 
 ## Architecture
@@ -176,7 +184,11 @@ The timing-critical thread.
 - **No hot-path allocation:** all per-tick scratch is pre-sized in the
   constructor, so latency variance stays low.
 - **Welford stats** (`include/stats.hpp`) accumulate latency and jitter
-  in O(1) per tick.
+  in O(1) per tick (mean/stddev/min/max).
+- **Tail-latency percentiles** (`include/histogram.hpp`): a fixed-memory,
+  log-bucketed histogram records every fusion-latency sample in O(1) and
+  reports **p50 / p99 / p99.9** — the mean hides the scheduler-induced
+  tail, the percentiles expose it.
 
 ### Logger (`include/logger.hpp`)
 
@@ -202,10 +214,13 @@ found no data races.
 - `test_kalman` — filter math in isolation: predict-only coasting,
   covariance shrinkage, velocity inferred from a position-only ramp, and
   a covariance that stays symmetric and positive-semidefinite.
+- `test_histogram` — percentile accuracy on constant and uniform streams;
+  that a heavy tail lifts p99.9 well above p50.
 
 Compiled with `-Wall -Wextra -Wpedantic -Wshadow -Wconversion
 -Wsign-conversion` (g++/clang) or `/W4 /permissive-` (MSVC) and clean.
-CI builds and runs the suite on Linux (g++) and Windows (MSVC).
+CI builds and runs the suite on Linux (g++) and Windows (MSVC), plus
+Linux builds under Address/UB and Thread sanitizers.
 
 ## Layout
 
@@ -220,6 +235,7 @@ sensor-fusion-pipeline/
 │   ├── config.hpp           SensorConfig, EstimatorConfig
 │   ├── pipeline_config.hpp  battery_config(), robotics_config()
 │   ├── stats.hpp            Welford RunningStats
+│   ├── histogram.hpp        LatencyHistogram (p50/p99/p99.9)
 │   ├── sensor.hpp           SensorProducer<Buffer>
 │   ├── estimator.hpp        Estimator<SensorBuffer, LogBuffer>
 │   ├── kalman.hpp           KalmanFilter2 (constant-velocity)
@@ -234,9 +250,11 @@ sensor-fusion-pipeline/
 │   ├── test_estimator.cpp
 │   ├── test_logger.cpp
 │   ├── test_kalman.cpp
+│   ├── test_histogram.cpp
 │   └── test_util.hpp
 ├── scripts/
-│   └── plot_latency.py
+│   ├── plot_latency.py
+│   └── plot_fusion.py      raw vs filtered (the money plot)
 └── benchmarks/
     ├── results.md
     ├── battery_latency.png

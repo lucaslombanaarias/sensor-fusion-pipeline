@@ -35,6 +35,29 @@ mostly under 100 µs with rare sub-millisecond and, once in this run, a
 single ~5.7 ms stall. This is the expected behavior on a non-realtime
 Linux kernel without CPU pinning or `SCHED_FIFO`.
 
+## Tail latency (p50 / p99 / p99.9)
+
+The mean is a poor summary of a latency distribution with a tail — it
+sits below the values that actually hurt. Each run now records every
+fusion-latency sample into a fixed-memory, log-bucketed histogram
+(`include/histogram.hpp`, HdrHistogram-style, ~12.5% relative
+resolution, O(1) per tick) and reports the percentiles directly:
+
+```
+latency mean   : 0.38 us
+latency p50    : 0.35 us
+latency p99    : 0.62 us
+latency p99.9  : 4.10 us     <- the tail the mean hides
+latency max    : 7.60 us
+```
+
+The p50 tracks the mean closely (the body is near-Gaussian), but p99.9
+is an order of magnitude higher — that gap is the OS preempting the
+estimator inside the timed region, and it's exactly the number you want
+when sizing a real-time budget. Absolute values are machine-dependent;
+reproduce on your hardware with `--compare`, which prints the full
+percentile breakdown for both buffer variants side by side.
+
 ## Lock-free vs locked
 
 Same pipeline, run twice — once with the lock-free SPSC buffers, once
@@ -114,8 +137,17 @@ giving a time constant of about 95 ms at the 5 ms loop period.
 complementary filter on the Position/Velocity channels:
 
 ```bash
-./build/sfp --config robotics --duration 30 --kalman --csv robot_kf.csv
+./build/sfp --config robotics --duration 8 --no-filter --csv raw.csv
+./build/sfp --config robotics --duration 8 --kalman    --csv kf.csv
+python3 scripts/plot_fusion.py --raw raw.csv --filtered kf.csv \
+    --truth-slope 0.5 --residual --label Kalman -o benchmarks/fusion_kalman.png
 ```
+
+Plotting the position *error* (estimate − true trajectory) makes the
+smoothing visible regardless of the absolute scale: the raw encoder
+scatters, the Kalman estimate hugs zero.
+
+![fusion](fusion_kalman.png)
 
 On the same noisy-encoder / clean-velocity setup as the complementary
 filter, `test_estimator` measures:

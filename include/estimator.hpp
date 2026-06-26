@@ -37,6 +37,7 @@
 #pragma once
 
 #include "config.hpp"
+#include "histogram.hpp"
 #include "kalman.hpp"
 #include "messages.hpp"
 #include "stats.hpp"
@@ -114,6 +115,8 @@ public:
     FusedState                       last_state() const noexcept { return last_state_; }
     // Latency stats are in NANOSECONDS (fusion work is often sub-us).
     const RunningStats&              latency_ns() const noexcept { return latency_stats_; }
+    // Latency histogram (also nanoseconds) for percentile queries.
+    const LatencyHistogram&          latency_hist() const noexcept { return latency_hist_; }
     // Jitter stats are in MICROSECONDS (scheduler-scale).
     const RunningStats&              jitter_us()  const noexcept { return jitter_stats_; }
     const std::vector<std::uint64_t>& samples_consumed() const noexcept {
@@ -174,6 +177,7 @@ private:
                 std::chrono::duration_cast<std::chrono::nanoseconds>(
                     work_end - work_start).count();
             latency_stats_.add(static_cast<double>(latency_ns));
+            latency_hist_.record(static_cast<double>(latency_ns));
 
             if (log_buffer_) {
                 const LogRecord record{
@@ -353,6 +357,7 @@ private:
     // State, owned by the estimator thread. Read-after-join only.
     FusedState                 last_state_{};
     RunningStats               latency_stats_;
+    LatencyHistogram           latency_hist_;
     RunningStats               jitter_stats_;
     std::vector<std::uint64_t> samples_consumed_per_sensor_;
     std::atomic<std::uint64_t> tick_count_{0};

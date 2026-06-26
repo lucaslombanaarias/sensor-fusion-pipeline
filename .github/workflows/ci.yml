@@ -11,7 +11,7 @@ jobs:
     name: Linux (g++)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Compiler version
         run: g++ --version
@@ -33,7 +33,7 @@ jobs:
     name: Windows (MSVC)
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Configure
         run: cmake -B build-cmake
@@ -43,3 +43,19 @@ jobs:
 
       - name: Test
         run: ctest --test-dir build-cmake -C Release --output-on-failure
+
+  sanitizers:
+    name: Sanitizers (Linux)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        sanitizer: [SFP_ASAN, SFP_TSAN]
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Build and test (${{ matrix.sanitizer }})
+        run: |
+          cmake -B build-san -DCMAKE_BUILD_TYPE=Debug -D${{ matrix.sanitizer }}=ON
+          cmake --build build-san -j
+          ctest --test-dir build-san --output-on-failure
