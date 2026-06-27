@@ -32,8 +32,16 @@ true trajectory — the raw encoder (red) against the filtered estimate
 
 ![fusion](benchmarks/fusion_kalman.png)
 
-Full methodology, the lock-free-vs-locked comparison, and the
-tail-latency percentiles are in
+And the headline real-data result: an **Extended Kalman Filter fusing
+dead-reckoning (forward speed + gyro yaw-rate) with GPS, on a real
+[KITTI](https://www.cvlibs.net/datasets/kitti/) drive** (~1 km, 1594
+frames). Dead-reckoning alone drifts to **167 m** RMSE, raw GPS sits at
+**2.19 m**, and the fused EKF reaches **1.77 m** — better than either:
+
+![kitti](benchmarks/kitti_ekf_trajectory.png)
+
+Full methodology, the lock-free-vs-locked comparison, the tail-latency
+percentiles, and the KITTI EKF evaluation are in
 [benchmarks/results.md](benchmarks/results.md).
 
 ## Architecture
@@ -196,6 +204,40 @@ Drains the `LogRecord` buffer on its own thread and writes CSV. The only
 thread that touches the file, so its I/O cost never enters the
 estimator's measured latency.
 
+## Extended Kalman Filter — IMU/GPS localization on KITTI
+
+The per-channel fusion, complementary filter, and 2-state Kalman filter
+all assume *linear* models. `include/ekf.hpp` is the nonlinear step: a
+2-D Extended Kalman Filter that localizes a vehicle by fusing
+dead-reckoning (forward speed + gyroscope yaw-rate) with GPS position
+fixes — the textbook robotics localization filter.
+
+- **Nonlinear, coupled state** `[x, y, heading]`. The motion model
+  rotates the forward velocity by the heading (`cos`/`sin` of a state
+  variable), so its **Jacobian is recomputed every step** — that's what
+  makes it *Extended*. Heading and position are coupled through the
+  Jacobian, so GPS position fixes also sharpen the heading estimate.
+- **Tiny fixed-size matrices** (`include/matrix.hpp`): compile-time
+  dimensions catch shape errors, everything is stack-allocated, and the
+  only inverse needed is a closed-form 2×2 (the GPS innovation). No
+  Eigen, no allocation — same standard-library-only discipline as the
+  rest of the project.
+- **Validated on real data.** `apps/ekf_localization` runs the filter
+  over a real KITTI raw drive. `scripts/fetch_kitti_oxts.py` grabs just
+  the GPS/IMU stream (~2 MB via HTTP range requests, not the 6 GB image
+  zip):
+
+  ```bash
+  python3 scripts/fetch_kitti_oxts.py 2011_09_30_drive_0033 kitti_seq
+  ./build/ekf_localization kitti_seq kitti_ekf.csv
+  python3 scripts/plot_trajectory.py kitti_ekf.csv benchmarks/kitti_ekf_trajectory.png
+  ```
+
+  On drive `2011_09_30_drive_0033`: dead-reckoning alone drifts to
+  ~167 m RMSE, raw GPS sits at ~2.19 m, the fused EKF reaches ~1.77 m.
+  `test_ekf` checks the same "fusion beats both baselines" property on a
+  synthetic trajectory, so CI validates the filter without the download.
+
 ## Testing
 
 Every module has a multithreaded test suite. The concurrency-heavy ones
@@ -216,6 +258,9 @@ found no data races.
   a covariance that stays symmetric and positive-semidefinite.
 - `test_histogram` — percentile accuracy on constant and uniform streams;
   that a heavy tail lifts p99.9 well above p50.
+- `test_ekf` — the fixed-size matrix algebra; EKF prediction/update; and
+  that on a noisy synthetic drive the fused EKF beats both GPS-only and
+  dead-reckoning-only.
 
 Compiled with `-Wall -Wextra -Wpedantic -Wshadow -Wconversion
 -Wsign-conversion` (g++/clang) or `/W4 /permissive-` (MSVC) and clean.
@@ -239,11 +284,15 @@ sensor-fusion-pipeline/
 │   ├── sensor.hpp           SensorProducer<Buffer>
 │   ├── estimator.hpp        Estimator<SensorBuffer, LogBuffer>
 │   ├── kalman.hpp           KalmanFilter2 (constant-velocity)
+│   ├── ekf.hpp              Ekf2D (IMU/GPS, nonlinear)
+│   ├── matrix.hpp           tiny fixed-size Mat<R,C>
 │   ├── logger.hpp           Logger<LogBuffer>
 │   ├── platform.hpp         ScopedHighResTimer (Windows timer shim)
 │   └── benchmark.hpp        run_pipeline<...>()
 ├── src/
 │   └── main.cpp             CLI + orchestration
+├── apps/
+│   └── ekf_localization.cpp KITTI IMU/GPS EKF demo
 ├── tests/
 │   ├── test_ring_buffer.cpp
 │   ├── test_sensor.cpp
@@ -251,16 +300,18 @@ sensor-fusion-pipeline/
 │   ├── test_logger.cpp
 │   ├── test_kalman.cpp
 │   ├── test_histogram.cpp
+│   ├── test_ekf.cpp
 │   └── test_util.hpp
 ├── scripts/
 │   ├── plot_latency.py
-│   └── plot_fusion.py      raw vs filtered (the money plot)
+│   ├── plot_fusion.py       raw vs filtered (the money plot)
+│   ├── plot_trajectory.py   KITTI truth/GPS/EKF trajectory
+│   └── fetch_kitti_oxts.py  download just the GPS/IMU stream
 └── benchmarks/
     ├── results.md
     ├── battery_latency.png
-    ├── battery_sample.csv
-    ├── robotics_latency.png
-    └── robotics_sample.csv
+    ├── kitti_ekf_trajectory.png
+    └── ...
 ```
 
 ## Possible extensions

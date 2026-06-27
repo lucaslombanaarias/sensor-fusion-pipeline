@@ -170,6 +170,47 @@ Timing is unchanged from the other configs (the update is a handful of
 scalar operations, no matrix inversion): mean fusion latency stays
 around 1 µs at 199–200 Hz with zero drops.
 
+## Real-data validation: KITTI IMU/GPS EKF
+
+The 2-state Kalman filter and the complementary filter are linear. The
+Extended Kalman Filter (`include/ekf.hpp`) is the nonlinear step: it
+localizes a vehicle by fusing dead-reckoning (forward speed + gyro
+yaw-rate) with GPS position fixes, carrying heading in the state and
+re-linearizing the motion model every step.
+
+It is evaluated on a **real KITTI raw drive** (`2011_09_30_drive_0033`,
+~1 km, 1594 frames at ~10 Hz). KITTI's OXTS stream is an RTK-grade INS
+solution, so it serves as ground truth: the real inertial channels drive
+the prediction, and a simulated consumer GPS (true position + Gaussian
+noise, downsampled to ~1 Hz) drives the updates. The dead-reckoning
+inputs are corrupted with a realistic gyro bias and noise so they drift,
+exactly as a real low-cost IMU would.
+
+| estimator                    | position RMSE |
+|------------------------------|---------------|
+| dead-reckoning only (no GPS) | ~167 m (drifts) |
+| GPS only (1 Hz, σ = 1.5 m)   | ~2.19 m (no drift, noisy) |
+| **EKF (fused)**              | **~1.77 m** |
+
+The fused estimate beats both inputs: GPS anchors the drift, the
+high-rate dead-reckoning fills in smooth motion between fixes. The plot
+shows the dead-reckoning path peeling away while the EKF (blue) tracks
+ground truth and smooths the scattered GPS fixes:
+
+![kitti](kitti_ekf_trajectory.png)
+
+```bash
+python3 scripts/fetch_kitti_oxts.py 2011_09_30_drive_0033 kitti_seq
+./build/ekf_localization kitti_seq kitti_ekf.csv
+python3 scripts/plot_trajectory.py kitti_ekf.csv benchmarks/kitti_ekf_trajectory.png
+```
+
+`fetch_kitti_oxts.py` pulls only the GPS/IMU text (~2 MB) out of the
+6 GB sequence zip with HTTP range requests, so the demo is reproducible
+without the full dataset. `test_ekf` checks the same
+"fusion beats both baselines" property on a synthetic trajectory, so CI
+validates the filter without any download.
+
 ## Environment
 
 - Compiler: g++ 13.3.0, `-std=c++17 -O2`

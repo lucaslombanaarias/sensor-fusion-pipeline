@@ -39,6 +39,10 @@ target_compile_features(sfp_core INTERFACE cxx_std_17)
 add_executable(sfp src/main.cpp)
 target_link_libraries(sfp PRIVATE sfp_core)
 
+# KITTI IMU/GPS EKF localization demo (runs on a downloaded OXTS sequence).
+add_executable(ekf_localization apps/ekf_localization.cpp)
+target_link_libraries(ekf_localization PRIVATE sfp_core)
+
 # Tests.
 enable_testing()
 
@@ -66,9 +70,13 @@ add_executable(test_histogram tests/test_histogram.cpp)
 target_link_libraries(test_histogram PRIVATE sfp_core)
 add_test(NAME histogram COMMAND test_histogram)
 
+add_executable(test_ekf tests/test_ekf.cpp)
+target_link_libraries(test_ekf PRIVATE sfp_core)
+add_test(NAME ekf COMMAND test_ekf)
+
 set(SFP_TEST_TARGETS
     test_ring_buffer test_sensor test_estimator test_logger
-    test_kalman test_histogram)
+    test_kalman test_histogram test_ekf)
 
 # Optional TSAN build: `cmake -DSFP_TSAN=ON ..`
 option(SFP_TSAN "Build tests with ThreadSanitizer" OFF)
