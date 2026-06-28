@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sensor Fusion — live</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <h1>Sensor Fusion Pipeline <span class="sub">· live</span></h1>
+  <div class="controls">
+    <label>config
+      <select id="config">
+        <option value="robotics">robotics</option>
+        <option value="battery">battery</option>
+      </select>
+    </label>
+    <label>filter
+      <select id="filter">
+        <option value="kalman">Kalman</option>
+        <option value="complementary">complementary</option>
+        <option value="none">raw</option>
+      </select>
+    </label>
+    <button id="toggle">Start</button>
+    <span id="status" class="status off">stopped</span>
+  </div>
+</header>
+
+<section class="cards">
+  <div class="card"><div class="k">tick</div><div class="v" id="stat-tick">—</div></div>
+  <div class="card"><div class="k">loop rate</div><div class="v" id="stat-hz">—</div><div class="u">Hz</div></div>
+  <div class="card"><div class="k">fusion latency</div><div class="v" id="stat-lat">—</div><div class="u">µs</div></div>
+  <div class="card"><div class="k">jitter</div><div class="v" id="stat-jit">—</div><div class="u">µs</div></div>
+  <div class="card"><div class="k">throughput</div><div class="v" id="stat-rx">—</div><div class="u">ticks/s</div></div>
+</section>
+
+<main id="charts"></main>
+
+<footer>
+  C++ pipeline streams JSON ticks → Python stdlib SSE server → this page.
+  Window: last <span id="win">10</span>s.
+</footer>
+
+<script src="app.js"></script>
+</body>
+</html>

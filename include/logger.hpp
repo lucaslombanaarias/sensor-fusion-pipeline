@@ -38,14 +38,19 @@ namespace sfp {
 template <typename LogBuffer>
 class Logger {
 public:
+    // stream_json: instead of writing CSV to `path`, emit one JSON object
+    // per tick to stdout (flushed live). This is what feeds the web
+    // dashboard's Server-Sent-Events stream; `path` is ignored.
     Logger(const std::string&             path,
            std::vector<SensorType>        channels,  // columns to emit
            LogBuffer*                      buffer,
-           const std::atomic<bool>*        running)
+           const std::atomic<bool>*        running,
+           bool                            stream_json = false)
         : path_(path)
         , channels_(std::move(channels))
         , buffer_(buffer)
         , running_(running)
+        , stream_json_(stream_json)
     {}
 
     Logger(const Logger&)            = delete;
@@ -54,19 +59,24 @@ public:
     Logger& operator=(Logger&&)      = delete;
 
     bool start() {
-        file_ = std::fopen(path_.c_str(), "w");
-        if (!file_) return false;
-        write_header();
+        if (stream_json_) {
+            file_ = stdout;          // stream JSON to stdout; no header
+        } else {
+            file_ = std::fopen(path_.c_str(), "w");
+            if (!file_) return false;
+            write_header();
+        }
         thread_ = std::thread(&Logger::run, this);
         return true;
     }
 
     void join() {
         if (thread_.joinable()) thread_.join();
-        if (file_) {
+        // Don't fclose stdout in stream mode — we don't own it.
+        if (file_ && !stream_json_) {
             std::fclose(file_);
-            file_ = nullptr;
         }
+        file_ = nullptr;
     }
 
     std::uint64_t records_written() const noexcept {
@@ -84,6 +94,7 @@ private:
     }
 
     void write_record(const LogRecord& rec, double t_seconds) {
+        if (stream_json_) { write_json(rec, t_seconds); return; }
         // Fixed-width-ish CSV. fprintf is fine here — this is the logger
         // thread, decoupled from the estimator, so its cost doesn't
         // affect the measured loop latency.
@@ -97,6 +108,26 @@ private:
             std::fprintf(file_, ",%.6f", rec.state.values[idx]);
         }
         std::fprintf(file_, ",%u\n",
+                     static_cast<unsigned>(rec.state.channel_mask));
+    }
+
+    // One compact JSON object per line, e.g.
+    //   {"tick":42,"t":0.21,"latency_ns":380,"jitter_us":35,
+    //    "temperature":40.1,"voltage":399.8,"current":120.3,"mask":7}
+    void write_json(const LogRecord& rec, double t_seconds) {
+        std::fprintf(file_,
+                     "{\"tick\":%llu,\"t\":%.6f,\"latency_ns\":%lld,"
+                     "\"jitter_us\":%lld",
+                     static_cast<unsigned long long>(rec.state.tick),
+                     t_seconds,
+                     static_cast<long long>(rec.loop_latency_ns),
+                     static_cast<long long>(rec.loop_jitter_us));
+        for (SensorType ch : channels_) {
+            const std::size_t idx = static_cast<std::size_t>(ch);
+            std::fprintf(file_, ",\"%s\":%.6f",
+                         sensor_type_name(ch), rec.state.values[idx]);
+        }
+        std::fprintf(file_, ",\"mask\":%u}\n",
                      static_cast<unsigned>(rec.state.channel_mask));
     }
 
@@ -117,6 +148,9 @@ private:
                 write_record(rec, t);
                 records_written_.fetch_add(1, std::memory_order_relaxed);
                 any = true;
+            }
+            if (any && stream_json_) {
+                std::fflush(file_);  // push this batch to the SSE reader now
             }
             if (!any) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
@@ -141,6 +175,7 @@ private:
     const std::atomic<bool>* running_;
     std::thread              thread_;
     std::FILE*               file_ = nullptr;
+    bool                     stream_json_ = false;
 
     std::atomic<std::uint64_t> records_written_{0};
 };

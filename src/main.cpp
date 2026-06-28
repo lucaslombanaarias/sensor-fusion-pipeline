@@ -108,6 +108,7 @@ int main(int argc, char** argv) {
     bool        compare     = false;
     bool        kalman      = false;
     bool        no_filter   = false;
+    bool        stream      = false;
 
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
@@ -125,11 +126,12 @@ int main(int argc, char** argv) {
         else if (arg == "--compare")   compare = true;
         else if (arg == "--kalman")    kalman = true;
         else if (arg == "--no-filter") no_filter = true;
+        else if (arg == "--stream")    stream = true;
         else if (arg == "--help" || arg == "-h") {
             std::printf(
                 "usage: %s [--config battery|robotics] "
                 "[--duration S] [--spin-us N] [--csv PATH] [--compare] "
-                "[--kalman] [--no-filter]\n",
+                "[--kalman] [--no-filter] [--stream]\n",
                 argv[0]);
             return 0;
         } else {
@@ -156,15 +158,25 @@ int main(int argc, char** argv) {
         cfg.estimator.use_complementary_filter = false;
     }
 
-    std::printf("=== Sensor fusion pipeline: %s config ===\n",
-                cfg.name.c_str());
-    std::printf("  %zu sensors, %.0f Hz estimator, %.0f s run, "
-                "%d us spin window%s\n\n",
-                cfg.sensors.size(), cfg.estimator.loop_hz,
-                cfg.duration_s, spin_us,
-                cfg.estimator.use_kalman_filter   ? ", Kalman filter"
-                : cfg.estimator.use_complementary_filter ? ", complementary filter"
-                : "");
+    // In --stream mode stdout carries pure JSON for the dashboard, so the
+    // human-readable banner goes to stderr instead.
+    std::FILE* info = stream ? stderr : stdout;
+    std::fprintf(info, "=== Sensor fusion pipeline: %s config ===\n",
+                 cfg.name.c_str());
+    std::fprintf(info, "  %zu sensors, %.0f Hz estimator, %.0f s run, "
+                 "%d us spin window%s\n\n",
+                 cfg.sensors.size(), cfg.estimator.loop_hz,
+                 cfg.duration_s, spin_us,
+                 cfg.estimator.use_kalman_filter   ? ", Kalman filter"
+                 : cfg.estimator.use_complementary_filter ? ", complementary filter"
+                 : "");
+
+    if (stream) {
+        // One JSON object per fused tick to stdout, live, for --duration.
+        sfp::run_pipeline<LFSensorBuf, LFLogBuf>(
+            cfg, "lock-free", "", /*stream_json=*/true);
+        return 0;
+    }
 
     if (compare) {
         std::printf("Running lock-free pipeline (with CSV)...\n");

@@ -117,7 +117,7 @@ the 1 ms Windows timer floor rather than by the pipeline.
 
 ```
 sfp [--config battery|robotics] [--duration SECONDS]
-    [--spin-us N] [--csv PATH] [--compare] [--kalman]
+    [--spin-us N] [--csv PATH] [--compare] [--kalman] [--stream]
 ```
 
 - `--config`   which sensor set to simulate (default battery)
@@ -127,6 +127,29 @@ sfp [--config battery|robotics] [--duration SECONDS]
 - `--compare`  run lock-free and locked back to back, print a table
 - `--kalman`   use the Kalman filter for Position/Velocity instead of the
                complementary filter (meaningful for the robotics config)
+- `--stream`   emit one JSON object per fused tick to stdout (feeds the
+               live dashboard); no CSV, no banner on stdout
+
+## Live dashboard
+
+A real-time browser view of the pipeline — sensor traces, the fused
+estimate, and live latency/jitter — instead of static PNGs.
+
+```bash
+make                          # (or cmake) build sfp first
+python3 dashboard/server.py   # then open http://localhost:8000
+```
+
+The data path is **`sfp --stream` (C++) → `dashboard/server.py`
+(Python standard library, Server-Sent Events) → the browser**
+(`dashboard/index.html`, vanilla JS + Canvas, no chart library). The
+server launches the pipeline, relays each JSON tick to the page, and the
+page redraws scrolling charts on every frame. Pick the config (battery /
+robotics) and filter (Kalman / complementary / raw) in the header and
+hit Start; closing the stream stops the underlying `sfp` process.
+
+No new dependencies: the C++ side stays standard-library-only, the
+server is stdlib Python, the frontend is plain HTML/CSS/JS.
 
 ## Design notes
 
@@ -302,6 +325,9 @@ sensor-fusion-pipeline/
 │   └── main.cpp             CLI + orchestration
 ├── apps/
 │   └── ekf_localization.cpp KITTI IMU/GPS EKF demo
+├── dashboard/               live web view (sfp --stream → SSE → browser)
+│   ├── server.py            stdlib HTTP + SSE relay
+│   ├── index.html / app.js / style.css
 ├── tests/
 │   ├── test_ring_buffer.cpp
 │   ├── test_sensor.cpp
