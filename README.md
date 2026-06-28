@@ -149,6 +149,12 @@ The lock-free buffer is the foundation. Key decisions:
 - **Drop on full, never block.** A full buffer drops the new item and
   bumps a counter rather than blocking — staleness beats blocking in a
   real-time loop.
+- **`MpscRingBuffer` for multiple writers.** A bounded Vyukov-style
+  variant where any number of producers can `push()` concurrently: each
+  slot carries an atomic sequence number and producers claim a position
+  with a CAS, so there's no lock and no single-writer assumption. Same
+  interface and drop policy; `test_mpsc` hammers it with four producer
+  threads (and CI runs that under ThreadSanitizer).
 
 A `LockedRingBuffer` with an identical interface backs the benchmark
 comparison.
@@ -261,6 +267,9 @@ found no data races.
 - `test_ekf` — the fixed-size matrix algebra; EKF prediction/update; and
   that on a noisy synthetic drive the fused EKF beats both GPS-only and
   dead-reckoning-only.
+- `test_mpsc` — FIFO and drop-on-full single-threaded; then four
+  concurrent producers with no loss, no duplication, and per-producer
+  order preserved.
 
 Compiled with `-Wall -Wextra -Wpedantic -Wshadow -Wconversion
 -Wsign-conversion` (g++/clang) or `/W4 /permissive-` (MSVC) and clean.
@@ -275,7 +284,7 @@ sensor-fusion-pipeline/
 ├── CMakeLists.txt
 ├── Makefile
 ├── include/
-│   ├── ring_buffer.hpp      SPSC + locked variants
+│   ├── ring_buffer.hpp      SPSC + MPSC + locked variants
 │   ├── messages.hpp         SensorReading, FusedState, LogRecord
 │   ├── config.hpp           SensorConfig, EstimatorConfig
 │   ├── pipeline_config.hpp  battery_config(), robotics_config()
@@ -301,6 +310,7 @@ sensor-fusion-pipeline/
 │   ├── test_kalman.cpp
 │   ├── test_histogram.cpp
 │   ├── test_ekf.cpp
+│   ├── test_mpsc.cpp
 │   └── test_util.hpp
 ├── scripts/
 │   ├── plot_latency.py
@@ -322,5 +332,6 @@ sensor-fusion-pipeline/
   starting point.
 - CPU pinning + `SCHED_FIFO` to push jitter down another order of
   magnitude and remove the millisecond-scale scheduler spikes.
-- A multi-producer buffer variant if a single channel ever needs more
-  than one writer.
+- Wire `MpscRingBuffer` into a fan-in stage — many same-type sensors
+  feeding one fused channel — and benchmark it against N separate SPSC
+  buffers.

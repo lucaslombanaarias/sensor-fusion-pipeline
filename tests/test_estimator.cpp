@@ -43,6 +43,17 @@ using LockedLBuf     = sfp::LockedRingBuffer<sfp::LogRecord,     kLogBufCap>;
 using LockedSensor   = sfp::SensorProducer<LockedSBuf>;
 using LockedEstimator = sfp::Estimator<LockedSBuf, LockedLBuf>;
 
+// Windows may fall back to the ~15.6 ms system timer for a background
+// process even with platform.hpp's 1 ms request (a Win11 focus/power
+// policy), capping the loop near 64 Hz with ~16 ms jitter. Where a check
+// depends on the achievable loop rate (tick counts, jitter), relax it
+// there; the value/accuracy/fusion-latency checks stay strict on both.
+#if defined(_WIN32)
+constexpr bool kWindows = true;
+#else
+constexpr bool kWindows = false;
+#endif
+
 // Compute mean and stddev of fused-state values on a single channel by
 // draining the log buffer. Skips ticks where the channel had no fresh
 // reading (its bit cleared in channel_mask).
@@ -90,13 +101,13 @@ bool test_single_sensor_converges() {
     estimator.join();
 
     const auto ticks = estimator.tick_count();
-    if (ticks < 40) {
+    if (ticks < (kWindows ? 20u : 40u)) {
         std::cerr << "  FAIL: only " << ticks << " estimator ticks\n";
         return false;
     }
 
     const auto sum = summarize_channel(lbuf, sfp::SensorType::Temperature);
-    if (sum.n < 30) {
+    if (sum.n < (kWindows ? 15u : 30u)) {
         std::cerr << "  FAIL: only " << sum.n << " channel updates\n";
         return false;
     }
@@ -272,9 +283,13 @@ bool test_timing_and_jitter() {
     const auto& lat  = est.latency_ns();  // nanoseconds
     const auto& jit  = est.jitter_us();   // microseconds
 
-    // 200 Hz × 1 s = 200 ticks. Allow 15% under for warmup + scheduler.
-    if (ticks < 170) {
-        std::cerr << "  FAIL: only " << ticks << " ticks at 200 Hz\n";
+    // 200 Hz x 1 s = 200 ticks. Linux allows 15% under for warmup +
+    // scheduler; Windows may fall back to the ~15.6 ms timer (see
+    // kWindows note), so the floor there only guards against a dead loop.
+    const std::uint64_t min_ticks = kWindows ? 50u : 170u;
+    if (ticks < min_ticks) {
+        std::cerr << "  FAIL: only " << ticks << " ticks at 200 Hz "
+                  << "(min " << min_ticks << ")\n";
         return false;
     }
     // Fusion of one sensor is sub-microsecond: mean well under 100 us
@@ -285,9 +300,11 @@ bool test_timing_and_jitter() {
                   << " max=" << lat.max() << " ns\n";
         return false;
     }
-    // Jitter can spike on a busy machine; 5 ms cap is loose but
-    // catches obvious bugs (forgetting to update next_tick, etc).
-    if (jit.max() > 5000.0) {
+    // Jitter can spike on a busy machine; the cap is loose but catches
+    // obvious bugs (forgetting to update next_tick, etc). On Windows the
+    // ~15.6 ms timer fallback alone can push jitter past a 5 ms cap.
+    const double jitter_cap_us = kWindows ? 50000.0 : 5000.0;
+    if (jit.max() > jitter_cap_us) {
         std::cerr << "  FAIL: jitter max " << jit.max() << " us\n";
         return false;
     }
@@ -323,7 +340,7 @@ bool test_locked_estimator() {
     est.join();
 
     const auto sum = summarize_channel(lbuf, sfp::SensorType::Current);
-    if (sum.n < 20 || std::abs(sum.mean - 2.5) > 0.05) {
+    if (sum.n < (kWindows ? 10u : 20u) || std::abs(sum.mean - 2.5) > 0.05) {
         std::cerr << "  FAIL: locked estimator mean " << sum.mean
                   << " (n=" << sum.n << ")\n";
         return false;

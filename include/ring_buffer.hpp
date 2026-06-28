@@ -24,6 +24,7 @@
 #include <array>
 #include <atomic>
 #include <cstddef>
+#include <cstdint>
 #include <mutex>
 
 namespace sfp {
@@ -181,6 +182,113 @@ private:
     std::size_t tail_{0};
     std::size_t size_{0};
     std::size_t dropped_{0};
+};
+
+// Multi-producer / single-consumer lock-free ring buffer — a bounded
+// Vyukov queue. Where SpscRingBuffer assumes exactly one writer (its
+// relaxed store to head_ would race if two threads pushed at once), this
+// lets *any number of threads* push concurrently: each slot carries an
+// atomic sequence number, and producers claim a slot by CAS-ing a shared
+// enqueue counter, then publish the slot via its sequence. The consumer
+// mirrors it on the dequeue side. (The algorithm is actually MPMC-safe;
+// the pipeline only needs the single-consumer case.) Same interface and
+// same drop-on-full policy as the other buffers, so it drops in wherever
+// a channel grows a second writer.
+template <typename T, std::size_t Capacity>
+class MpscRingBuffer {
+    static_assert(Capacity > 0, "Capacity must be > 0");
+    static_assert((Capacity & (Capacity - 1)) == 0,
+                  "Capacity must be a power of 2");
+
+public:
+    MpscRingBuffer() {
+        // Slot i starts "ready to be written at position i".
+        for (std::size_t i = 0; i < Capacity; ++i)
+            slots_[i].seq.store(i, std::memory_order_relaxed);
+    }
+
+    MpscRingBuffer(const MpscRingBuffer&)            = delete;
+    MpscRingBuffer& operator=(const MpscRingBuffer&) = delete;
+    MpscRingBuffer(MpscRingBuffer&&)                 = delete;
+    MpscRingBuffer& operator=(MpscRingBuffer&&)      = delete;
+
+    // Safe to call from any number of producer threads at once.
+    bool push(const T& item) noexcept {
+        std::size_t pos = enqueue_.load(std::memory_order_relaxed);
+        for (;;) {
+            Slot& slot = slots_[pos & kMask];
+            const std::size_t seq = slot.seq.load(std::memory_order_acquire);
+            const std::intptr_t diff = static_cast<std::intptr_t>(seq) -
+                                       static_cast<std::intptr_t>(pos);
+            if (diff == 0) {
+                // Slot free and it's our turn — try to claim this position.
+                if (enqueue_.compare_exchange_weak(
+                        pos, pos + 1, std::memory_order_relaxed)) {
+                    slot.data = item;
+                    slot.seq.store(pos + 1, std::memory_order_release);
+                    return true;
+                }
+                // CAS failed: pos was refreshed with the current value, retry.
+            } else if (diff < 0) {
+                // We've lapped the consumer: buffer full. Drop the newest.
+                dropped_.fetch_add(1, std::memory_order_relaxed);
+                return false;
+            } else {
+                // Another producer owns this position; reload and retry.
+                pos = enqueue_.load(std::memory_order_relaxed);
+            }
+        }
+    }
+
+    bool pop(T& out) noexcept {
+        std::size_t pos = dequeue_.load(std::memory_order_relaxed);
+        for (;;) {
+            Slot& slot = slots_[pos & kMask];
+            const std::size_t seq = slot.seq.load(std::memory_order_acquire);
+            const std::intptr_t diff = static_cast<std::intptr_t>(seq) -
+                                       static_cast<std::intptr_t>(pos + 1);
+            if (diff == 0) {
+                if (dequeue_.compare_exchange_weak(
+                        pos, pos + 1, std::memory_order_relaxed)) {
+                    out = slot.data;
+                    // Release the slot for its next lap.
+                    slot.seq.store(pos + Capacity, std::memory_order_release);
+                    return true;
+                }
+            } else if (diff < 0) {
+                return false;  // empty
+            } else {
+                pos = dequeue_.load(std::memory_order_relaxed);
+            }
+        }
+    }
+
+    std::size_t size_approx() const noexcept {
+        const std::size_t e = enqueue_.load(std::memory_order_acquire);
+        const std::size_t d = dequeue_.load(std::memory_order_acquire);
+        return e - d;
+    }
+
+    std::size_t dropped() const noexcept {
+        return dropped_.load(std::memory_order_relaxed);
+    }
+
+    static constexpr std::size_t capacity() noexcept { return Capacity; }
+
+private:
+    static constexpr std::size_t kMask      = Capacity - 1;
+    static constexpr std::size_t kCacheLine = 64;
+
+    struct Slot {
+        std::atomic<std::size_t> seq;
+        T                        data;
+    };
+
+    // Storage and the two contended counters each on their own cache line.
+    alignas(kCacheLine) std::array<Slot, Capacity> slots_{};
+    alignas(kCacheLine) std::atomic<std::size_t> enqueue_{0};  // producers CAS
+    alignas(kCacheLine) std::atomic<std::size_t> dequeue_{0};  // consumer CAS
+    alignas(kCacheLine) std::atomic<std::size_t> dropped_{0};
 };
 
 } // namespace sfp

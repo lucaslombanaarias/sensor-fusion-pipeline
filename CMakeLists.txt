@@ -74,9 +74,13 @@ add_executable(test_ekf tests/test_ekf.cpp)
 target_link_libraries(test_ekf PRIVATE sfp_core)
 add_test(NAME ekf COMMAND test_ekf)
 
+add_executable(test_mpsc tests/test_mpsc.cpp)
+target_link_libraries(test_mpsc PRIVATE sfp_core)
+add_test(NAME mpsc COMMAND test_mpsc)
+
 set(SFP_TEST_TARGETS
     test_ring_buffer test_sensor test_estimator test_logger
-    test_kalman test_histogram test_ekf)
+    test_kalman test_histogram test_ekf test_mpsc)
 
 # Optional TSAN build: `cmake -DSFP_TSAN=ON ..`
 option(SFP_TSAN "Build tests with ThreadSanitizer" OFF)

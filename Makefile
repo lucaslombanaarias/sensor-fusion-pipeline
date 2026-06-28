@@ -20,7 +20,8 @@ TESTS       = $(BUILD_DIR)/test_ring_buffer \
               $(BUILD_DIR)/test_logger \
               $(BUILD_DIR)/test_kalman \
               $(BUILD_DIR)/test_histogram \
-              $(BUILD_DIR)/test_ekf
+              $(BUILD_DIR)/test_ekf \
+              $(BUILD_DIR)/test_mpsc
 
 .PHONY: all test clean
 
@@ -55,6 +56,9 @@ $(BUILD_DIR)/test_histogram: tests/test_histogram.cpp include/histogram.hpp | $(
 
 $(BUILD_DIR)/test_ekf: tests/test_ekf.cpp include/ekf.hpp include/matrix.hpp | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) tests/test_ekf.cpp -o $@ $(LDFLAGS)
+
+$(BUILD_DIR)/test_mpsc: tests/test_mpsc.cpp include/ring_buffer.hpp | $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) tests/test_mpsc.cpp -o $@ $(LDFLAGS)
 
 test: $(TESTS)
 	@for t in $(TESTS); do \
