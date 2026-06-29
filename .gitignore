@@ -20,6 +20,9 @@ Makefile.cmake
 .vscode/*
 !.vscode/tasks.json
 .idea/
+
+# Claude Code: launch.json is shared; local settings are personal.
+.claude/settings.local.json
 *.swp
 *.swo
 .DS_Store

@@ -57,7 +57,8 @@ struct BenchmarkResult {
 template <typename SensorBufT, typename LogBufT>
 BenchmarkResult run_pipeline(const PipelineConfig& cfg,
                              const std::string&    label,
-                             const std::string&    csv_path) {
+                             const std::string&    csv_path,
+                             bool                  stream_json = false) {
     using Sensor    = SensorProducer<SensorBufT>;
     using Estim     = Estimator<SensorBufT, LogBufT>;
 
@@ -76,15 +77,17 @@ BenchmarkResult run_pipeline(const PipelineConfig& cfg,
         ports.push_back(typename Estim::SensorPort{buf, scfg});
     }
 
+    const bool want_logger = stream_json || !csv_path.empty();
+
     LogBufT log_buffer;
     Estim estimator(cfg.estimator, ports,
-                    csv_path.empty() ? nullptr : &log_buffer,
+                    want_logger ? &log_buffer : nullptr,
                     &running);
 
     std::unique_ptr<Logger<LogBufT>> logger;
-    if (!csv_path.empty()) {
+    if (want_logger) {
         logger = std::make_unique<Logger<LogBufT>>(
-            csv_path, cfg.log_channels, &log_buffer, &running);
+            csv_path, cfg.log_channels, &log_buffer, &running, stream_json);
     }
 
     // Start consumers before producers so no samples pile up before
