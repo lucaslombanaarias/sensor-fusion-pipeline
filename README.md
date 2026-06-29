@@ -2,16 +2,32 @@
 
 [![CI](https://github.com/lucaslombanaarias/sensor-fusion-pipeline/actions/workflows/ci.yml/badge.svg)](https://github.com/lucaslombanaarias/sensor-fusion-pipeline/actions/workflows/ci.yml)
 
-A modular C++17 pipeline that fuses several concurrent, noisy sensor
-streams into a single real-time state estimate at a fixed loop rate,
-with measured latency and jitter. One config struct swaps the whole
-pipeline between an EV battery-pack monitor (temperature / voltage /
-current) and a robot-arm joint estimator (position / velocity / force).
+A modular C++17 pipeline that fuses concurrent, noisy sensor streams into a
+single real-time state estimate at a fixed 200 Hz loop, with per-run latency
+and jitter measured from a fixed-memory histogram. One config struct swaps the
+entire pipeline between an EV battery-pack monitor (temperature / voltage /
+current) and a robot-arm joint estimator (position / velocity / force) — the
+hot path is lock-free and allocation-free, and the whole thing is
+standard-library-only: no ROS, no Boost, no Eigen.
 
-**Standard library only** — no ROS, no Boost, no Eigen. The only
-non-stdlib dependency is matplotlib, used by an out-of-process Python
-script to plot the CSV output; the pipeline itself has zero external
-dependencies.
+![The live dashboard: the C++ pipeline streaming a robot-arm joint estimate, then one dropdown swapping the entire pipeline over to a battery-pack monitor](docs/dashboard.gif)
+
+> **Live [dashboard](#live-dashboard).** The C++ pipeline streams JSON ticks to
+> the browser over Server-Sent Events. Flipping one dropdown swaps the whole
+> pipeline — and every chart — from a robot-arm joint estimator to an EV
+> battery monitor, live.
+
+| Metric | Result |
+| --- | --- |
+| [Fusion latency](#results-at-a-glance) | **0.38 µs** mean (376 ns) · p50 / p99 / p99.9 reported per run |
+| [Lock-free vs locked](#results-at-a-glance) | **1.9×** lower mean fusion latency than a mutex-backed buffer |
+| [EKF on real KITTI](#extended-kalman-filter--imugps-localization-on-kitti) | **1.77 m** RMSE fused — beats raw GPS (2.19 m) and dead-reckoning (167 m) |
+| [Loop rate](#results-at-a-glance) | **199.4 Hz** against a 200 Hz target |
+
+**What's notable:** lock-free SPSC/MPSC ring buffers, TSan-clean · validated on
+real KITTI GPS/IMU data · live in-browser dashboard · zero external
+dependencies. (The pipeline itself is dependency-free; matplotlib is used only
+by the optional out-of-process plotting scripts.)
 
 ## Results at a glance
 
@@ -66,6 +82,47 @@ ever cause log records to drop — it can never stall the estimator. A
 slow estimator can only cause sensor samples to drop — it can never
 block a sensor. Nothing on the estimator's hot path takes a lock or
 allocates.
+
+### One tick, end to end
+
+What actually happens on each of the estimator's 200 ticks per second, and
+why each step is shaped the way it is:
+
+1. **Producers publish, asynchronously.** Every sensor thread runs its own
+   fixed-rate `sleep_until` loop and writes `value(t) = true + drift·t +
+   N(0, σ)` into *its own* SPSC ring (`include/sensor.hpp`). They never
+   coordinate with the estimator or each other; a full ring drops the new
+   sample and bumps a counter rather than blocking (staleness beats stalling).
+
+2. **The estimator wakes precisely.** A two-stage wait — coarse
+   `sleep_until(deadline − spin_window)` then a short busy-spin to the
+   deadline — trades ~2% of a core for single-digit-µs deadline accuracy on a
+   non-RT kernel (`include/estimator.hpp`).
+
+3. **Drain, newest-wins.** It non-blockingly pops each sensor ring until
+   empty, keeping the freshest reading per channel plus a bitmask of which
+   channels reported this tick. No locks, no waiting on a slow sensor.
+
+4. **Fuse.** Per channel it computes the inverse-variance weighted mean
+   `fused = Σ(wᵢ·zᵢ) / Σ(wᵢ)`, `wᵢ = 1/σᵢ²` — the ML estimate under Gaussian
+   noise. For the robotics Position/Velocity pair an optional complementary or
+   Kalman filter (`--kalman`) refines the estimate and *coasts on the velocity
+   integral* on ticks with no fresh encoder sample, so the state is always
+   present.
+
+5. **Measure itself.** The wall-clock spent in steps 3–4 is the fusion
+   latency. It feeds an O(1) Welford accumulator (mean/stddev/min/max) and a
+   fixed-memory log-bucketed histogram (`include/histogram.hpp`) for the
+   p50/p99/p99.9 tail — all without allocating on the hot path.
+
+6. **Publish and resync.** The `FusedState` is pushed into the *second* SPSC
+   ring for the logger thread to write as timestamped CSV (or, under
+   `--stream`, emitted as one JSON line for the [live dashboard](#live-dashboard)).
+   The loop then resyncs to the next deadline without catch-up bursts after a
+   preemption.
+
+The per-module rationale for each of these pieces is in
+[Design notes](#design-notes) below.
 
 ## Build and run
 

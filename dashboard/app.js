@@ -35,6 +35,7 @@ function reset() {
 }
 
 function start() {
+  if (es) { es.close(); es = null; }   // drop any previous stream first
   reset();
   const cfg = $("config").value;
   const filt = $("filter").value;
@@ -166,5 +167,10 @@ function frame() {
 }
 
 $("toggle").addEventListener("click", () => (running ? stop() : start()));
+// Switching config or filter while streaming restarts with the new setting,
+// so the before/after of a filter change is one gesture.
+for (const id of ["config", "filter"]) {
+  $(id).addEventListener("change", () => { if (running) start(); });
+}
 setStatus(false);
 requestAnimationFrame(frame);
